@@ -259,6 +259,15 @@ if train_on_data:
 	import tensorflow as tf
 	import numpy
 
+	# Based on ReLU
+	# TODO: Take a look at PReLU, and see if it helps.
+
+	def inital_weight_sqrt(shape):
+		return tf.Variable(tf.random_normal(shape, stddev=numpy.sqrt(2.0/shape[0])))
+
+	def initial_bias(shape):
+		return tf.Variable(tf.constant(0.0, shape=shape))
+
 	# Initial Approximation of train_bounds
 
 	train_bounds = math.ceil(len(end_data_set[0]) * 0.9)
@@ -281,50 +290,50 @@ if train_on_data:
 	numpy.random.shuffle(data_output)
 	
 	# Multi-Layer NN: 13->...->(12 or 3, most likely 3))
-	# Best NN so far: 13->300->300->300->300->300->300->300->400->3 with 200.49911 as error after 500 epochs. Batch Size = 1024
-	# Got lucky on above result tbh. I can't seem to figure out why sometimes it stabilizes at ~3700 EVEN IF THE ONLY CHANGE IS THAT DATA IS SHUFFLED
+	# Best NN so far: 13->300->300->300->300->300->300->300->300->3 with 199.41641 as error after 350 epochs. Batch Size = 4096
+	# Figured out reason to previous unstability. Turns out initializing weights to a Normal dist. where the mean is nonzero and the std. dev. is constant regardless of input to neuron is a bad idea.
 
 	x_input = tf.placeholder(tf.float32, shape=[None, 13])
 	y_actual = tf.placeholder(tf.float32, shape=[None, 3])
 	keep_prob = tf.placeholder(tf.float32)
 
-	W_lay1 = tf.Variable(tf.truncated_normal([13, 300], stddev=0.1))
-	b_lay1 = tf.Variable(tf.constant(0.2, shape=[300]))
+	W_lay1 = inital_weight_sqrt([13, 300])
+	b_lay1 = initial_bias([300])
 	first_layer = tf.nn.relu(tf.add(tf.matmul(x_input, W_lay1), b_lay1))
 	first_layer_drop = tf.nn.dropout(first_layer, keep_prob)
 
-	W_lay2 = tf.Variable(tf.truncated_normal([300, 300], stddev=0.1))
-	b_lay2 = tf.Variable(tf.constant(0.2, shape=[300]))
+	W_lay2 = inital_weight_sqrt([300, 300])
+	b_lay2 = initial_bias([300])
 	second_layer = tf.nn.relu(tf.add(tf.matmul(first_layer_drop, W_lay2), b_lay2))
 	second_layer_drop = tf.nn.dropout(second_layer, keep_prob)
 
-	W_lay3 = tf.Variable(tf.truncated_normal([300, 300], stddev=0.1))
-	b_lay3 = tf.Variable(tf.constant(0.2, shape=[300]))
+	W_lay3 = inital_weight_sqrt([300, 300])
+	b_lay3 = initial_bias([300])
 	third_layer = tf.nn.relu(tf.add(tf.matmul(second_layer_drop, W_lay3), b_lay3))
 	third_layer_drop = tf.nn.dropout(third_layer, keep_prob)
 
-	W_lay4 = tf.Variable(tf.truncated_normal([300, 300], stddev=0.1))
-	b_lay4 = tf.Variable(tf.constant(0.2, shape=[300]))
+	W_lay4 = inital_weight_sqrt([300, 300])
+	b_lay4 = initial_bias([300])
 	fourth_layer = tf.nn.relu(tf.add(tf.matmul(third_layer_drop, W_lay4), b_lay4))
 	fourth_layer_drop = tf.nn.dropout(fourth_layer, keep_prob)
 	
-	W_lay5 = tf.Variable(tf.truncated_normal([300, 300], stddev=0.1))
-	b_lay5 = tf.Variable(tf.constant(0.2, shape=[300]))
+	W_lay5 = inital_weight_sqrt([300, 300])
+	b_lay5 = initial_bias([300])
 	fifth_layer = tf.nn.relu(tf.add(tf.matmul(fourth_layer_drop, W_lay5), b_lay5))
 	fifth_layer_drop = tf.nn.dropout(fifth_layer, keep_prob)
 	
-	W_lay6 = tf.Variable(tf.truncated_normal([300, 300], stddev=0.1))
-	b_lay6 = tf.Variable(tf.constant(0.2, shape=[300]))
+	W_lay6 = inital_weight_sqrt([300, 300])
+	b_lay6 = initial_bias([300])
 	sixth_layer = tf.nn.relu(tf.add(tf.matmul(fifth_layer_drop, W_lay6), b_lay6))
 	sixth_layer_drop = tf.nn.dropout(sixth_layer, keep_prob)
 
-	W_lay7 = tf.Variable(tf.truncated_normal([300, 300], stddev=0.1))
-	b_lay7 = tf.Variable(tf.constant(0.2, shape=[300]))
+	W_lay7 = inital_weight_sqrt([300, 300])
+	b_lay7 = initial_bias([300])
 	seventh_layer = tf.nn.relu(tf.add(tf.matmul(sixth_layer_drop, W_lay7), b_lay7))
 	seventh_layer_drop = tf.nn.dropout(seventh_layer, keep_prob)
 
-	W_lay8 = tf.Variable(tf.truncated_normal([300, 300], stddev=0.1))
-	b_lay8 = tf.Variable(tf.constant(0.2, shape=[300]))
+	W_lay8 = inital_weight_sqrt([300, 300])
+	b_lay8 = initial_bias([300])
 	eighth_layer = tf.nn.relu(tf.add(tf.matmul(seventh_layer_drop, W_lay8), b_lay8))
 	eighth_layer_drop = tf.nn.dropout(eighth_layer, keep_prob)
 	"""
@@ -338,8 +347,8 @@ if train_on_data:
 	tenth_layer = tf.nn.relu(tf.add(tf.matmul(ninth_layer_drop, W_lay10), b_lay10))
 	tenth_layer_drop = tf.nn.dropout(tenth_layer, keep_prob)
 	"""
-	W_out = tf.Variable(tf.truncated_normal([300, 3], mean=0.3, stddev=0.1))
-	b_out = tf.Variable(tf.constant(0.2, shape=[3]))
+	W_out = inital_weight_sqrt([300, 3])
+	b_out = initial_bias([3])
 
 	y_calc = tf.add(tf.matmul(eighth_layer_drop, W_out), b_out)
 
@@ -370,7 +379,7 @@ if train_on_data:
 				epoch_counter = epoch_counter + 1
 				print("Epoch", epoch_counter, "- Error:", distance.eval(feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 1}))
 
-			session.run(train_step, feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 0.5})
+			session.run(train_step, feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 1})
 			
 		#save_state.save(session, ".\BallPhysicsModel")
 		print("Final Error:", distance.eval(feed_dict={x_input:data_input[train_bounds:], y_actual:data_output[train_bounds:], keep_prob: 1}))
