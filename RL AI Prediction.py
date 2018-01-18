@@ -272,7 +272,7 @@ if train_on_data:
 
 	train_bounds = math.ceil(len(end_data_set[0]) * 0.9)
 	least_common_multiple = 65536
-	batch_size = 4096
+	batch_size = 1024
 	point_in_batch = 0
 
 	# Training data divisible by chosen batch size, finalize train_bounds value
@@ -290,8 +290,8 @@ if train_on_data:
 	numpy.random.shuffle(data_output)
 	
 	# Multi-Layer NN: 13->...->(12 or 3, most likely 3))
-	# Best NN so far: 13->300->300->300->300->300->300->300->300->3 with 199.41641 as error after 350 epochs. Batch Size = 4096
-	# Figured out reason to previous unstability. Turns out initializing weights to a Normal dist. where the mean is nonzero and the std. dev. is constant regardless of input to neuron is a bad idea.
+	# Best NN so far: 13->300->300->300->300->300->300->300->300->3 with 193.16919 as error after 500 epochs. Batch Size = 1024
+	# Figured out reason to previous unstability. Turns out initializing weights to a Normal dist. where the mean is nonzero and the std. dev. is constant regardless of inputs to neuron is a bad idea.
 
 	x_input = tf.placeholder(tf.float32, shape=[None, 13])
 	y_actual = tf.placeholder(tf.float32, shape=[None, 3])
@@ -336,21 +336,21 @@ if train_on_data:
 	b_lay8 = initial_bias([300])
 	eighth_layer = tf.nn.relu(tf.add(tf.matmul(seventh_layer_drop, W_lay8), b_lay8))
 	eighth_layer_drop = tf.nn.dropout(eighth_layer, keep_prob)
-	"""
-	W_lay9 = tf.Variable(tf.truncated_normal([250, 250], mean=0.3, stddev=0.1))
-	b_lay9 = tf.Variable(tf.constant(0.2, shape=[250]))
+	
+	W_lay9 = inital_weight_sqrt([300, 300])
+	b_lay9 = initial_bias([300])
 	ninth_layer = tf.nn.relu(tf.add(tf.matmul(eighth_layer_drop, W_lay9), b_lay9))
 	ninth_layer_drop = tf.nn.dropout(ninth_layer, keep_prob)
 
-	W_lay10 = tf.Variable(tf.truncated_normal([250, 250], mean=0.3, stddev=0.1))
-	b_lay10 = tf.Variable(tf.constant(0.2, shape=[250]))
+	W_lay10 = inital_weight_sqrt([300, 300])
+	b_lay10 = initial_bias([300])
 	tenth_layer = tf.nn.relu(tf.add(tf.matmul(ninth_layer_drop, W_lay10), b_lay10))
 	tenth_layer_drop = tf.nn.dropout(tenth_layer, keep_prob)
-	"""
+	
 	W_out = inital_weight_sqrt([300, 3])
 	b_out = initial_bias([3])
 
-	y_calc = tf.add(tf.matmul(eighth_layer_drop, W_out), b_out)
+	y_calc = tf.add(tf.matmul(tenth_layer_drop, W_out), b_out)
 
 	distance = tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.square(tf.subtract(y_actual, y_calc)), 1)))
 	train_step = tf.train.AdamOptimizer(1e-3).minimize(distance)
@@ -369,7 +369,7 @@ if train_on_data:
 		except Exception: # No existing model was found, no problem.
 			pass
 		"""
-		while epoch_counter < 350:
+		while epoch_counter < 500:
 			train_input = data_input[point_in_batch:point_in_batch + batch_size]
 			train_output = data_output[point_in_batch:point_in_batch + batch_size]
 			point_in_batch = point_in_batch + batch_size
