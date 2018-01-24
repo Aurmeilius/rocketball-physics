@@ -268,6 +268,27 @@ if train_on_data:
 	def initial_bias(shape):
 		return tf.Variable(tf.constant(0.0, shape=shape))
 
+	def create_graph(given_input, layers): # TODO: Add Dropout
+		tensor_weights = []
+		tensor_bias = []
+		tensor_layers = []
+
+		for i in range(len(layers) - 1):
+			tensor_weights.append(inital_weight_sqrt([layers[i], layers[i + 1]]))
+			tensor_bias.append(initial_bias([layers[i + 1]]))
+
+			if i + 2 == len(layers):
+				if i == 0:
+					tensor_layers.append(tf.add(tf.matmul(given_input, tensor_weights[i]), tensor_bias[i]))
+				else:	
+					tensor_layers.append(tf.add(tf.matmul(tensor_layers[i - 1], tensor_weights[i]), tensor_bias[i]))
+			elif i != 0: 
+				tensor_layers.append(tf.nn.relu(tf.add(tf.matmul(tensor_layers[i - 1], tensor_weights[i]), tensor_bias[i])))	
+			else:
+				tensor_layers.append(tf.nn.relu(tf.add(tf.matmul(given_input, tensor_weights[i]), tensor_bias[i])))	
+
+		return tensor_layers[-1]	
+
 	# Initial Approximation of train_bounds
 
 	train_bounds = math.ceil(len(end_data_set[0]) * 0.9)
@@ -290,67 +311,26 @@ if train_on_data:
 	numpy.random.shuffle(data_output)
 	
 	# Multi-Layer NN: 13->...->(12 or 3, most likely 3))
-	# Best NN so far: 13->300->300->300->300->300->300->300->300->3 with 193.16919 as error after 500 epochs. Batch Size = 1024
-	# Figured out reason to previous unstability. Turns out initializing weights to a Normal dist. where the mean is nonzero and the std. dev. is constant regardless of inputs to neuron is a bad idea.
+	# Best NN so far: 13->400->400->400->400->400->400->3 with 188.7012 as error after 500 epochs. Batch Size = 1024
+	# Figured out reason to previous unstability. Turns out initializing weights to a Normal dist. where the mean is far from zero and the std. dev. is constant regardless of inputs to neuron is a bad idea.
 
 	x_input = tf.placeholder(tf.float32, shape=[None, 13])
 	y_actual = tf.placeholder(tf.float32, shape=[None, 3])
 	keep_prob = tf.placeholder(tf.float32)
 
-	W_lay1 = inital_weight_sqrt([13, 300])
-	b_lay1 = initial_bias([300])
+	"""
+	W_lay1 = inital_weight_sqrt([13, 400])
+	b_lay1 = initial_bias([400])
 	first_layer = tf.nn.relu(tf.add(tf.matmul(x_input, W_lay1), b_lay1))
 	first_layer_drop = tf.nn.dropout(first_layer, keep_prob)
 
-	W_lay2 = inital_weight_sqrt([300, 300])
-	b_lay2 = initial_bias([300])
+	W_lay2 = inital_weight_sqrt([400, 400])
+	b_lay2 = initial_bias([400])
 	second_layer = tf.nn.relu(tf.add(tf.matmul(first_layer_drop, W_lay2), b_lay2))
 	second_layer_drop = tf.nn.dropout(second_layer, keep_prob)
-
-	W_lay3 = inital_weight_sqrt([300, 300])
-	b_lay3 = initial_bias([300])
-	third_layer = tf.nn.relu(tf.add(tf.matmul(second_layer_drop, W_lay3), b_lay3))
-	third_layer_drop = tf.nn.dropout(third_layer, keep_prob)
-
-	W_lay4 = inital_weight_sqrt([300, 300])
-	b_lay4 = initial_bias([300])
-	fourth_layer = tf.nn.relu(tf.add(tf.matmul(third_layer_drop, W_lay4), b_lay4))
-	fourth_layer_drop = tf.nn.dropout(fourth_layer, keep_prob)
+	"""
 	
-	W_lay5 = inital_weight_sqrt([300, 300])
-	b_lay5 = initial_bias([300])
-	fifth_layer = tf.nn.relu(tf.add(tf.matmul(fourth_layer_drop, W_lay5), b_lay5))
-	fifth_layer_drop = tf.nn.dropout(fifth_layer, keep_prob)
-	
-	W_lay6 = inital_weight_sqrt([300, 300])
-	b_lay6 = initial_bias([300])
-	sixth_layer = tf.nn.relu(tf.add(tf.matmul(fifth_layer_drop, W_lay6), b_lay6))
-	sixth_layer_drop = tf.nn.dropout(sixth_layer, keep_prob)
-
-	W_lay7 = inital_weight_sqrt([300, 300])
-	b_lay7 = initial_bias([300])
-	seventh_layer = tf.nn.relu(tf.add(tf.matmul(sixth_layer_drop, W_lay7), b_lay7))
-	seventh_layer_drop = tf.nn.dropout(seventh_layer, keep_prob)
-
-	W_lay8 = inital_weight_sqrt([300, 300])
-	b_lay8 = initial_bias([300])
-	eighth_layer = tf.nn.relu(tf.add(tf.matmul(seventh_layer_drop, W_lay8), b_lay8))
-	eighth_layer_drop = tf.nn.dropout(eighth_layer, keep_prob)
-	
-	W_lay9 = inital_weight_sqrt([300, 300])
-	b_lay9 = initial_bias([300])
-	ninth_layer = tf.nn.relu(tf.add(tf.matmul(eighth_layer_drop, W_lay9), b_lay9))
-	ninth_layer_drop = tf.nn.dropout(ninth_layer, keep_prob)
-
-	W_lay10 = inital_weight_sqrt([300, 300])
-	b_lay10 = initial_bias([300])
-	tenth_layer = tf.nn.relu(tf.add(tf.matmul(ninth_layer_drop, W_lay10), b_lay10))
-	tenth_layer_drop = tf.nn.dropout(tenth_layer, keep_prob)
-	
-	W_out = inital_weight_sqrt([300, 3])
-	b_out = initial_bias([3])
-
-	y_calc = tf.add(tf.matmul(tenth_layer_drop, W_out), b_out)
+	y_calc = create_graph(x_input, [13, 600, 600, 600, 600, 3])
 
 	distance = tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.square(tf.subtract(y_actual, y_calc)), 1)))
 	train_step = tf.train.AdamOptimizer(1e-3).minimize(distance)
