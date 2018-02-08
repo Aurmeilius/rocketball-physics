@@ -15,6 +15,7 @@ grab_online = False
 grab_online_count = 0
 
 files = []
+files_online = []
 rl_data = []
 
 for root, dirs, these_files in os.walk("."):
@@ -46,28 +47,36 @@ if grab_online:
 	page_string = "https://www.rocketleaguereplays.com/api/replays"
 	details = {"User-Agent": "Mozilla/5.0"}
 	ex_replays = 0
-	proper_indices = [1, 2, 3, 4, 10, 11, 12, 13]
-	
+	threshold_row = 0
+	proper_indices = [1, 2, 3, 4, 10, 11, 12, 13] # Unranked 1v1-4v4 and Ranked Modes 1v1,2v2,3v3solo,3v3
+	failed_count = 0
+
 	# Obtain data from RocketLeagueReplays API
-	# TODO: accept replays post v1.35 as latest patch where ball physics changed, not just season 6
+	# Accept replays v1.35 and up as latest patch where ball physics changed, not just season 6
+	# Turns out start of season 5 is during 1.35
 
 	while not reached_end:
 		form_request = urllib.request.Request(page_string, None, headers=details)
 		content = {}
-		expect_half = 0
 		
 		with contextlib.closing(urllib.request.urlopen(form_request)) as url_handle:
 			content = json.loads(url_handle.read())
 	
 		for replay in content["results"]:
-			if replay["season"]["title"] != "Competitive Season 6": # Limit to season 6 unranked/ranked replays only, for now
-				expect_half = expect_half + 1
-				if expect_half == 30: # Raise flag when we have effectively seen no more season 6 replays
-					reached_end = True
-					break
-				continue
+			if replay["season"]["title"] != "Competitive Season 5": # Limit to season 5 unranked/ranked replays only, for now
+				if replay["season"]["title"] < "Competitive Season 5" or replay["season"]["title"] == "Season 1": # Season 4 and below is not accepted. S6 and above is fine
+					threshold_row = threshold_row + 1
+					if threshold_row == 300: # Raise flag when we have effectively seen no more season 5 replays
+						reached_end = True
+						break
+				else:
+					threshold_row = 0
 			elif replay["playlist"] in proper_indices:
-				files.append(replay["file"])
+				files_online.append(replay["file"])
+				threshold_row = 0
+			else:
+				failed_count = failed_count + 1
+
 
 			#if replay["date_created"] > "2017-07-05T00:00:00Z": - v1.35 release date
 				#print(replay["date_created"])
@@ -84,32 +93,10 @@ if grab_online:
 			"""
 		page_string = content["next"]
 
-	print("Replays from Online:", len(files))
+	print("Replays from Online:", len(files_online), "-", failed_count)
 
 if process_replay:
-	if len(files) == 0:
-		sys.exit("No replay files exist for processing.")
-
-	for file_path in files:
-		process = ""
-		try:
-			process = subprocess.run(["rattletrap", "-c", "-i", file_path], stdout=subprocess.PIPE, check=True, encoding="utf-8")
-		except subprocess.CalledProcessError:
-			print("Replay Failed:", file_path)
-			continue
-
-		main_data = json.loads(process.stdout)
-		
-		#num_frames = main_data["header"]["properties"]["value"]["NumFrames"]["value"]["int_property"]
-
-		#print(main_data["content"]["frames"][1]["delta"])
-		#print(main_data["header"]["properties"]["value"]["NumFrames"]["value"]["int_property"])
-		"""
-		with open("C:\\Users\\Aaron Mark Mugabe\\Desktop\TESTTWO.json", "w") as handme:
-			handme.write(json.dumps(main_data, sort_keys=True, indent=4))
-			handme.close()
-		"""
-
+	def process_replay_and_append_data(main_data):
 		ball_value = -1 # The ball has not spawned
 		ball_data = []
 		ball_in_play = False
@@ -221,9 +208,48 @@ if process_replay:
 				else:
 					old_no_contact = False
 
-		#print("\nFinal Ball Pos\n------------------------\n", ball_data)
-		#print("\nFinal Car Pos\n------------------------\n", car_position)
+	failed_processing = []
+	if len(files) == 0 and len(files_online) == 0:
+		sys.exit("No replay files exist for processing.")
+
+	files.extend(files_online)
+
+	for file_path in files:
+		process = ""
+		try:
+			process = subprocess.run(["rattletrap", "-c", "-i", file_path], stdout=subprocess.PIPE, check=True, encoding="utf-8")
+		except subprocess.CalledProcessError:
+			print("Replay Failed:", file_path)
+			failed_processing.append(file_path)
+			continue
+
+		main_data = json.loads(process.stdout)
+		process_replay_and_append_data(main_data)
 		print("Parsed", file_path, "- Current Data Points:", len(end_data_set[0]))
+
+	for file_path_failed in failed_processing:
+		process = ""
+		try:
+			process = subprocess.run(["rattletrap", "-c", "-i", file_path_failed], stdout=subprocess.PIPE, check=True, encoding="utf-8")
+		except subprocess.CalledProcessError:
+			print("Replay Failed:", file_path_failed)
+			continue
+
+		main_data = json.loads(process.stdout)
+		process_replay_and_append_data(main_data)
+		print("Parsed", file_path_failed, "- Current Data Points:", len(end_data_set[0]))
+
+	#num_frames = main_data["header"]["properties"]["value"]["NumFrames"]["value"]["int_property"]
+
+	#print(main_data["content"]["frames"][1]["delta"])
+	#print(main_data["header"]["properties"]["value"]["NumFrames"]["value"]["int_property"])
+	"""
+	with open("C:\\Users\\Aaron Mark Mugabe\\Desktop\TESTTWO.json", "w") as handme:
+		handme.write(json.dumps(main_data, sort_keys=True, indent=4))
+		handme.close()
+	"""
+	#print("\nFinal Ball Pos\n------------------------\n", ball_data)
+	#print("\nFinal Car Pos\n------------------------\n", car_position)
 
 	for i in range(len(end_data_set[0])):
 		end_data_set[0][i][-1] = end_data_set[1][i][-1] - end_data_set[0][i][-1]
@@ -268,6 +294,8 @@ if train_on_data:
 	def initial_bias(shape):
 		return tf.Variable(tf.constant(0.0, shape=shape))
 
+	# General Multi-Layer Perception Graph
+
 	def create_graph(given_input, layers): # TODO: Add Dropout
 		tensor_weights = []
 		tensor_bias = []
@@ -292,8 +320,8 @@ if train_on_data:
 	# Initial Approximation of train_bounds
 
 	train_bounds = math.ceil(len(end_data_set[0]) * 0.9)
-	least_common_multiple = 65536
-	batch_size = 1024
+	least_common_multiple = 512
+	batch_size = 512
 	point_in_batch = 0
 
 	# Training data divisible by chosen batch size, finalize train_bounds value
@@ -311,7 +339,7 @@ if train_on_data:
 	numpy.random.shuffle(data_output)
 	
 	# Multi-Layer NN: 13->...->(12 or 3, most likely 3))
-	# Best NN so far: 13->400->400->400->400->400->400->3 with 188.7012 as error after 500 epochs. Batch Size = 1024
+	# Best NN so far: 13->400->400->400->400->400->400->3 with 158.8246 as error after 500 epochs. Batch Size = 1024
 	# Figured out reason to previous unstability. Turns out initializing weights to a Normal dist. where the mean is far from zero and the std. dev. is constant regardless of inputs to neuron is a bad idea.
 
 	x_input = tf.placeholder(tf.float32, shape=[None, 13])
@@ -323,21 +351,23 @@ if train_on_data:
 	b_lay1 = initial_bias([400])
 	first_layer = tf.nn.relu(tf.add(tf.matmul(x_input, W_lay1), b_lay1))
 	first_layer_drop = tf.nn.dropout(first_layer, keep_prob)
-
-	W_lay2 = inital_weight_sqrt([400, 400])
-	b_lay2 = initial_bias([400])
-	second_layer = tf.nn.relu(tf.add(tf.matmul(first_layer_drop, W_lay2), b_lay2))
-	second_layer_drop = tf.nn.dropout(second_layer, keep_prob)
 	"""
 	
-	y_calc = create_graph(x_input, [13, 600, 600, 600, 600, 3])
+	y_calc = create_graph(x_input, [13, 200, 200, 200, 200, 200, 200, 3])
 
+	counter_out = 0
+	epoch_counter = tf.Variable(counter_out, trainable=False)
+	epoch_limit = 100
+
+	rate_decay = tf.train.exponential_decay(0.001, epoch_counter, 110, 0.1, staircase=True)
 	distance = tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.square(tf.subtract(y_actual, y_calc)), 1)))
+
+	# Because Staired Exponential Decay Is Stubborn to Work
 	train_step = tf.train.AdamOptimizer(1e-3).minimize(distance)
+	train_step_small = tf.train.AdamOptimizer(1e-4).minimize(distance)
+	train_step_smaller = tf.train.AdamOptimizer(1e-5).minimize(distance)
 
 	# Add saver, so models can be saved/loaded without rerun
-	
-	epoch_counter = 0
 
 	save_state = tf.train.Saver()
 
@@ -349,18 +379,25 @@ if train_on_data:
 		except Exception: # No existing model was found, no problem.
 			pass
 		"""
-		while epoch_counter < 500:
+		while counter_out < epoch_limit:
 			train_input = data_input[point_in_batch:point_in_batch + batch_size]
 			train_output = data_output[point_in_batch:point_in_batch + batch_size]
+
+			if counter_out < 50:
+				session.run(train_step, feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 1})
+			elif counter_out < 75:
+				session.run(train_step_small, feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 1})
+			else:
+				session.run(train_step_smaller, feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 1})
+
 			point_in_batch = point_in_batch + batch_size
 
 			if point_in_batch == train_bounds: # Completed an epoch (i.e all training data has seen the network with the same frequency.)
 				point_in_batch = 0
+				counter_out = counter_out + 1
 				epoch_counter = epoch_counter + 1
-				print("Epoch", epoch_counter, "- Error:", distance.eval(feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 1}))
+				print("Epoch", session.run(epoch_counter), "- Error:", distance.eval(feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 1}))
 
-			session.run(train_step, feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 1})
-			
 		#save_state.save(session, ".\BallPhysicsModel")
 		print("Final Error:", distance.eval(feed_dict={x_input:data_input[train_bounds:], y_actual:data_output[train_bounds:], keep_prob: 1}))
 		
