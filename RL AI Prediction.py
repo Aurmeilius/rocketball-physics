@@ -26,34 +26,30 @@ for root, dirs, these_files in os.walk("."):
 			rl_data.append(os.path.join(root, file_name))
 
 if len(sys.argv) == 1:
-	sys.exit("Use arguments -online, -replay and/or -train to specify program operation.")
+	sys.exit("Use arguments -online, -fetch and/or -train to specify program operation.")
 elif len(sys.argv) > 1:
 	for arg in sys.argv[1:]:
 		if arg == "-online":
 			grab_online = True
-		if arg == "-replay":
+		if arg == "-fetch":
 			process_replay = True
 		if arg == "-train":
 			train_on_data = True
 
 end_data_set = []
 
-end_data_set.append([])
-end_data_set.append([])
-
 if grab_online:
 
 	reached_end = False
 	page_string = "https://www.rocketleaguereplays.com/api/replays"
 	details = {"User-Agent": "Mozilla/5.0"}
-	ex_replays = 0
 	threshold_row = 0
-	proper_indices = [1, 2, 3, 4, 10, 11, 12, 13] # Unranked 1v1-4v4 and Ranked Modes 1v1,2v2,3v3solo,3v3
+	proper_playlists = [1, 2, 3, 4, 10, 11, 12, 13] # Unranked 1v1-4v4 and Ranked Modes 1v1,2v2,3v3solo,3v3
 	failed_count = 0
 
 	# Obtain data from RocketLeagueReplays API
 	# Accept replays v1.35 and up as latest patch where ball physics changed, not just season 6
-	# Turns out start of season 5 is during 1.35
+	# Turns out start of season 5 is patch v1.35
 
 	while not reached_end:
 		form_request = urllib.request.Request(page_string, None, headers=details)
@@ -63,24 +59,20 @@ if grab_online:
 			content = json.loads(url_handle.read())
 	
 		for replay in content["results"]:
-			if replay["season"]["title"] != "Competitive Season 5": # Limit to season 5 unranked/ranked replays only, for now
-				if replay["season"]["title"] < "Competitive Season 5" or replay["season"]["title"] == "Season 1": # Season 4 and below is not accepted. S6 and above is fine
+			if replay["season"]["title"] != "Competitive Season 6": # Limit to season X unranked/ranked replays only, for now
+				if replay["season"]["title"] < "Competitive Season 6" or replay["season"]["title"] == "Season 1": # Season X and below is not accepted. SX+1 and above is fine
 					threshold_row = threshold_row + 1
-					if threshold_row == 300: # Raise flag when we have effectively seen no more season 5 replays
+					if threshold_row == 300: # Raise flag when we have effectively seen no more season X replays
 						reached_end = True
 						break
 				else:
 					threshold_row = 0
-			elif replay["playlist"] in proper_indices:
+			elif replay["playlist"] in proper_playlists:
 				files_online.append(replay["file"])
 				threshold_row = 0
 			else:
 				failed_count = failed_count + 1
 
-
-			#if replay["date_created"] > "2017-07-05T00:00:00Z": - v1.35 release date
-				#print(replay["date_created"])
-				#ex_replays = ex_replays + 1
 			"""
 			current_file = replay["file"]
 			form_request_file = urllib.request.Request(current_file, None, headers=details)
@@ -97,16 +89,13 @@ if grab_online:
 
 if process_replay:
 	def process_replay_and_append_data(main_data):
-		ball_value = -1 # The ball has not spawned
+		ball_value = -1
 		ball_data = []
 		ball_in_play = False
 		goal_scored = False
 
-		car_values = [] # No cars spawned
+		car_values = []
 		car_position = []
-
-		#ball_ticks = 0
-		#hits = []
 
 		old_no_contact = False
 
@@ -169,15 +158,6 @@ if process_replay:
 										obj_struct["rotation"]["x"]["value"], obj_struct["rotation"]["y"]["value"], obj_struct["rotation"]["z"]["value"], 
 										obj_struct["linear_velocity"]["x"], obj_struct["linear_velocity"]["y"], obj_struct["linear_velocity"]["z"], 
 										obj_struct["angular_velocity"]["x"], obj_struct["angular_velocity"]["y"], obj_struct["angular_velocity"]["z"], time_frame]
-							
-						"""
-						if len(rep_item["value"]["updated"]) > 1:
-							for i in range(len(rep_item["value"]["updated"])):
-								if rep_item["value"]["updated"][i]["name"] == "TAGame.Ball_TA:HitTeamNum":
-									hits.append(frame["time"])
-
-						ball_ticks = ball_ticks + 1
-						"""
 			
 			# A workaround that is close enough to a proper to a theoretical TAGame.Ball_TA:HitPlayerNum marking.
 			# Using TAGame.Ball_TA:HitTeamNum is inadequate.
@@ -193,22 +173,21 @@ if process_replay:
 							(car_pos[2] - ball_data[2]) ** 2]))
 					except Exception as e: # An Index Out Of Range Exception BECAUSE CAR RESPAWNS IN REPLAYS ARE INCONSISTENT AF SO I'M SORRY
 						#print(e,car_values,car_position,time_frame)
-						break
+						continue
 
-					if dist < 250:
+					if dist < 250: # Farthest dist while still hitting the ball is 173.124233uu (tested w/ breakout), add buffer to that due to "replay lag" to be on the safe side.
 						car_hit_ball = True
 
 				if not car_hit_ball and ball_in_play:
 					if not old_no_contact:
-						end_data_set[0].append(list(ball_data))
-						end_data_set[1].append(list(ball_data))
+						end_data_set.append([])
+						end_data_set[-1].append(ball_data)
 						old_no_contact = True
 					else:
-						end_data_set[1][-1] = list(ball_data)
+						end_data_set[-1].append(ball_data)
 				else:
 					old_no_contact = False
 
-	failed_processing = []
 	if len(files) == 0 and len(files_online) == 0:
 		sys.exit("No replay files exist for processing.")
 
@@ -220,40 +199,28 @@ if process_replay:
 			process = subprocess.run(["rattletrap", "-c", "-i", file_path], stdout=subprocess.PIPE, check=True, encoding="utf-8")
 		except subprocess.CalledProcessError:
 			print("Replay Failed:", file_path)
-			failed_processing.append(file_path)
+			#files.append(file_path)
 			continue
 
 		main_data = json.loads(process.stdout)
-		process_replay_and_append_data(main_data)
-		print("Parsed", file_path, "- Current Data Points:", len(end_data_set[0]))
+		regular_match = False
+		packages = main_data["content"]["body"]["packages"]
+		map_name = main_data["header"]["body"]["properties"]["value"]["MapName"]["value"]["name"]
+		mutator_flags = ["..\\..\\TAGame\\CookedPCConsole\\Mutators_SF.upk", 
+						"..\\..\\TAGame\\CookedPCConsole\\Mutators_Balls_SF.upk", 
+						"..\\..\\TAGame\\CookedPCConsole\\Mutators_Items_SF.upk"]
+		non_standard_maps = ["NeoTokyo_P", "ARC_P", "Wasteland_P", "Wasteland_Night_P"]
 
-	for file_path_failed in failed_processing:
-		process = ""
-		try:
-			process = subprocess.run(["rattletrap", "-c", "-i", file_path_failed], stdout=subprocess.PIPE, check=True, encoding="utf-8")
-		except subprocess.CalledProcessError:
-			print("Replay Failed:", file_path_failed)
-			continue
-
-		main_data = json.loads(process.stdout)
-		process_replay_and_append_data(main_data)
-		print("Parsed", file_path_failed, "- Current Data Points:", len(end_data_set[0]))
-
-	#num_frames = main_data["header"]["properties"]["value"]["NumFrames"]["value"]["int_property"]
-
-	#print(main_data["content"]["frames"][1]["delta"])
-	#print(main_data["header"]["properties"]["value"]["NumFrames"]["value"]["int_property"])
-	"""
-	with open("C:\\Users\\Aaron Mark Mugabe\\Desktop\TESTTWO.json", "w") as handme:
-		handme.write(json.dumps(main_data, sort_keys=True, indent=4))
-		handme.close()
-	"""
-	#print("\nFinal Ball Pos\n------------------------\n", ball_data)
-	#print("\nFinal Car Pos\n------------------------\n", car_position)
-
-	for i in range(len(end_data_set[0])):
-		end_data_set[0][i][-1] = end_data_set[1][i][-1] - end_data_set[0][i][-1]
-		del end_data_set[1][i][-1]
+		if "..\\..\\TAGame\\CookedPCConsole\\GameInfo_Soccar_SF.upk" in packages: # Playing in Soccar Mode
+			if len([pack for pack in packages if pack in mutator_flags]) == 0: # No Mutators
+				if map_name not in non_standard_maps and "Labs" not in map_name: # Not A Non-Standard or Rocket Labs Map
+					regular_match = True
+			
+		if regular_match:
+			process_replay_and_append_data(main_data)
+			print("Parsed", file_path, "- Current Data Points:", len(end_data_set))
+		else:
+			print(file_path, "does not meet the standard requirements.")
 
 	if not train_on_data:
 		with open(str(time.time()) + ".rldata", "w") as dump:
@@ -274,6 +241,7 @@ if train_on_data:
 				opened.close()
 
 	print(len(end_data_set[0]))
+
 	# TEMPORARY: Tweak final data set to see if results change:
 	# What if only specifying distance is the key factor?
 
@@ -319,9 +287,9 @@ if train_on_data:
 
 	# Initial Approximation of train_bounds
 
-	train_bounds = math.ceil(len(end_data_set[0]) * 0.9)
-	least_common_multiple = 512
-	batch_size = 512
+	train_bounds = math.ceil(len(end_data_set[0]) * 0.95)
+	least_common_multiple = 2048
+	batch_size = 2048
 	point_in_batch = 0
 
 	# Training data divisible by chosen batch size, finalize train_bounds value
@@ -339,7 +307,8 @@ if train_on_data:
 	numpy.random.shuffle(data_output)
 	
 	# Multi-Layer NN: 13->...->(12 or 3, most likely 3))
-	# Best NN so far: 13->400->400->400->400->400->400->3 with 158.8246 as error after 500 epochs. Batch Size = 1024
+	# Best NN so far: 13->300->300->300->300->300->300->3 with 161.94354 as error after 200 epochs. Batch Size = 512
+	# (13->500*10->3) with 148.25333 as error after 200 epochs, batch size = 2048, 
 	# Figured out reason to previous unstability. Turns out initializing weights to a Normal dist. where the mean is far from zero and the std. dev. is constant regardless of inputs to neuron is a bad idea.
 
 	x_input = tf.placeholder(tf.float32, shape=[None, 13])
@@ -353,11 +322,11 @@ if train_on_data:
 	first_layer_drop = tf.nn.dropout(first_layer, keep_prob)
 	"""
 	
-	y_calc = create_graph(x_input, [13, 200, 200, 200, 200, 200, 200, 3])
+	y_calc = create_graph(x_input, [13, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 3])
 
 	counter_out = 0
 	epoch_counter = tf.Variable(counter_out, trainable=False)
-	epoch_limit = 100
+	epoch_limit = 400
 
 	rate_decay = tf.train.exponential_decay(0.001, epoch_counter, 110, 0.1, staircase=True)
 	distance = tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.square(tf.subtract(y_actual, y_calc)), 1)))
@@ -366,10 +335,11 @@ if train_on_data:
 	train_step = tf.train.AdamOptimizer(1e-3).minimize(distance)
 	train_step_small = tf.train.AdamOptimizer(1e-4).minimize(distance)
 	train_step_smaller = tf.train.AdamOptimizer(1e-5).minimize(distance)
+	train_step_smallest = tf.train.AdamOptimizer(1e-6).minimize(distance)
 
-	# Add saver, so models can be saved/loaded without rerun
+	# Add saver, so model(s) can be saved/loaded without rerun
 
-	save_state = tf.train.Saver()
+	save_state = tf.train.Saver([y_calc])
 
 	with tf.Session() as session:
 		session.run(tf.global_variables_initializer())
@@ -383,12 +353,14 @@ if train_on_data:
 			train_input = data_input[point_in_batch:point_in_batch + batch_size]
 			train_output = data_output[point_in_batch:point_in_batch + batch_size]
 
-			if counter_out < 50:
+			if counter_out < 200:
 				session.run(train_step, feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 1})
-			elif counter_out < 75:
+			elif counter_out < 300:
 				session.run(train_step_small, feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 1})
-			else:
+			elif counter_out < 350:
 				session.run(train_step_smaller, feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 1})
+			else:
+				session.run(train_step_smallest, feed_dict={x_input: train_input, y_actual: train_output, keep_prob: 1})
 
 			point_in_batch = point_in_batch + batch_size
 
@@ -402,9 +374,3 @@ if train_on_data:
 		print("Final Error:", distance.eval(feed_dict={x_input:data_input[train_bounds:], y_actual:data_output[train_bounds:], keep_prob: 1}))
 		
 		session.close()
-
-"""
-print("Ball Instances: %d Num Frames: %d" % (ball_ticks, num_frames))
-print("\nHit Ball Timestamps (", len(hits), ")\n------------------------\n", hits)
-print("\nFinal Data Set (", len(end_data_set[0]), ")\n------------------------\n", end_data_set)
-"""
