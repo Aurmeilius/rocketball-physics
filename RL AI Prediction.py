@@ -6,23 +6,28 @@ import time
 import subprocess
 import urllib.request
 import contextlib
-
-#num_frames = 0
+import numpy
+import itertools
+import random
 
 process_replay = False
+compress_data = False
 train_on_data = False
 grab_online = False
 grab_online_count = 0
 
 files = []
 files_online = []
+huge_data = []
 rl_data = []
 
 for root, dirs, these_files in os.walk("."):
 	for file_name in these_files:
 		if file_name.endswith(".replay"):
 			files.append(os.path.join(root, file_name))
-		if file_name.endswith(".rldata"):
+		if file_name.endswith(".large.npz"):
+			huge_data.append(os.path.join(root, file_name))
+		if file_name.endswith(".npz"):
 			rl_data.append(os.path.join(root, file_name))
 
 if len(sys.argv) == 1:
@@ -33,6 +38,8 @@ elif len(sys.argv) > 1:
 			grab_online = True
 		if arg == "-fetch":
 			process_replay = True
+		if arg == "-compress":
+			compress_data = True
 		if arg == "-train":
 			train_on_data = True
 
@@ -44,7 +51,7 @@ if grab_online:
 	page_string = "https://www.rocketleaguereplays.com/api/replays"
 	details = {"User-Agent": "Mozilla/5.0"}
 	threshold_row = 0
-	proper_playlists = [1, 2, 3, 4, 10, 11, 12, 13] # Unranked 1v1-4v4 and Ranked Modes 1v1,2v2,3v3solo,3v3
+	proper_playlists = [1, 2, 3, 4, 10, 11, 12, 13] # Unranked 1v1-4v4 and Ranked Modes 1v1,2v2,3v3solo,3v3 NOTE: DEPRECATED WITH NEW STYLE.
 	failed_count = 0
 
 	# Obtain data from RocketLeagueReplays API
@@ -59,20 +66,25 @@ if grab_online:
 			content = json.loads(url_handle.read())
 	
 		for replay in content["results"]:
-			if replay["season"]["title"] != "Competitive Season 6": # Limit to season X unranked/ranked replays only, for now
-				if replay["season"]["title"] < "Competitive Season 6" or replay["season"]["title"] == "Season 1": # Season X and below is not accepted. SX+1 and above is fine
+			if replay["season"]["title"] != "Competitive Season 5": # Limit to season X unranked/ranked replays only, for now
+				if replay["season"]["title"] < "Competitive Season 5" or replay["season"]["title"] == "Season 1": # Season X and below is not accepted. SX+1 and above is fine
 					threshold_row = threshold_row + 1
 					if threshold_row == 300: # Raise flag when we have effectively seen no more season X replays
 						reached_end = True
 						break
 				else:
 					threshold_row = 0
+			else:
+				files_online.append(replay["file"])
+				threshold_row = 0
+			"""
+			Deprecated Code. Still Useful though.
 			elif replay["playlist"] in proper_playlists:
 				files_online.append(replay["file"])
 				threshold_row = 0
 			else:
 				failed_count = failed_count + 1
-
+			"""
 			"""
 			current_file = replay["file"]
 			form_request_file = urllib.request.Request(current_file, None, headers=details)
@@ -85,14 +97,16 @@ if grab_online:
 			"""
 		page_string = content["next"]
 
-	print("Replays from Online:", len(files_online), "-", failed_count)
+	print("Replays from Online:", len(files_online))
 
 if process_replay:
+
 	def process_replay_and_append_data(main_data):
 		ball_value = -1
+		game_pointer = -1
 		ball_data = []
 		ball_in_play = False
-		goal_scored = False
+		overtime = False
 
 		car_values = []
 		car_position = []
@@ -106,33 +120,36 @@ if process_replay:
 
 			for rep_item in replicate_frame:
 				if "spawned" in rep_item["value"]: # Object Spawned In-Game
-					if rep_item["value"]["spawned"]["class_name"] == "TAGame.Ball_TA" and (not ball_in_play) and (not goal_scored):
+					if rep_item["value"]["spawned"]["class_name"] == "TAGame.Ball_TA":
 						ball_value = rep_item["actor_id"]["value"]
-						ball_in_play = True
 						#print("BALL RESPAWN", ball_value, time_frame)
 					elif rep_item["value"]["spawned"]["class_name"] == "TAGame.Car_TA" and (rep_item["actor_id"]["value"] not in car_values):
 						car_values.append(rep_item["actor_id"]["value"])
 						car_position.append([])
 						#print("CAR RESPAWN", car_values, car_position, time_frame)
-
+					elif rep_item["value"]["spawned"]["class_name"] == "TAGame.GameEvent_Soccar_TA":
+						game_pointer = rep_item["actor_id"]["value"]
+						#print("GAME EVENT", game_pointer, time_frame)
 				elif "destroyed" in rep_item["value"]: # Object Destroyed In-Game
 					if rep_item["actor_id"]["value"] in car_values:
 						delete_index = car_values.index(rep_item["actor_id"]["value"])
 						del car_position[delete_index]
 						del car_values[delete_index]
 						#print("CAR DESTROYED", rep_item["actor_id"]["value"], time_frame)
-					elif rep_item["actor_id"]["value"] == ball_value and goal_scored:
+					elif rep_item["actor_id"]["value"] == ball_value:
 						ball_value = -1
-						ball_in_play = False
-						goal_scored = False
 						#print("BALL DESTROYED", rep_item["actor_id"]["value"], time_frame)
-
-				elif "updated" in rep_item["value"]: # Update Object Position/Rotation, but check if goal was scored first
-					if rep_item["actor_id"]["value"] == ball_value:
-						if rep_item["value"]["updated"][0]["name"] == "Engine.Actor:bCollideActors" and ball_in_play and (not goal_scored):
-							ball_in_play = False
-							goal_scored = True
-							#print("GOAL", time_frame)
+				elif "updated" in rep_item["value"]: # Update Object Position/Rotation and check various game states
+					if rep_item["actor_id"]["value"] == ball_value and rep_item["value"]["updated"][0]["name"] == "Engine.Actor:bCollideActors": # Goal Was Scored
+						ball_in_play = False
+						#print("GOAL", time_frame)
+					if rep_item["actor_id"]["value"] == game_pointer and len(rep_item["value"]["updated"]) == 1 and rep_item["value"]["updated"][0]["name"] == "TAGame.GameEvent_Soccar_TA:bBallHasBeenHit": # Ball has been kicked off
+						ball_in_play = True
+						#print("BALL KICKOFF", time_frame)
+					if rep_item["actor_id"]["value"] == game_pointer and "TAGame.GameEvent_Soccar_TA:bOverTime" in [arr["name"] for arr in rep_item["value"]["updated"]] and not overtime: # Entered Overtime
+						overtime = True
+						ball_in_play = False
+						#print("OVERTIME", time_frame)
 
 					if rep_item["actor_id"]["value"] == ball_value or (rep_item["actor_id"]["value"] in car_values):
 						obj_struct = None
@@ -144,20 +161,20 @@ if process_replay:
 								obj_struct = arr["value"]["rigid_body_state"]
 								break
 
-						if obj_struct != None: # If fails, something else was updated, other than positional/rotational data (i.e, throttle or steer)
+						if obj_struct != None: # If fails, something else was updated other than positional/rotational data (i.e, throttle or steer)
 							if rep_item["actor_id"]["value"] != ball_value: # Fetch Car Data
 								car_position[car_values.index(rep_item["actor_id"]["value"])] = [obj_struct["location"]["x"], obj_struct["location"]["y"], 
 									obj_struct["location"]["z"], time_frame]
-							elif rep_item["actor_id"]["value"] == ball_value and ball_in_play and (not goal_scored): # Fetch ball Data
+							else: # Fetch Ball Data
 								if ("linear_velocity" not in obj_struct) and ("angular_velocity" not in obj_struct): # Occurs during ball respawn
 									ball_data = [obj_struct["location"]["x"], obj_struct["location"]["y"], obj_struct["location"]["z"],
-										obj_struct["rotation"]["x"]["value"], obj_struct["rotation"]["y"]["value"], obj_struct["rotation"]["z"]["value"], 
-										0, 0, 0, 0, 0, 0, time_frame]
+									obj_struct["rotation"]["x"]["value"], obj_struct["rotation"]["y"]["value"], obj_struct["rotation"]["z"]["value"], 
+									0, 0, 0, 0, 0, 0, time_frame]
 								else:
 									ball_data = [obj_struct["location"]["x"], obj_struct["location"]["y"], obj_struct["location"]["z"],
-										obj_struct["rotation"]["x"]["value"], obj_struct["rotation"]["y"]["value"], obj_struct["rotation"]["z"]["value"], 
-										obj_struct["linear_velocity"]["x"], obj_struct["linear_velocity"]["y"], obj_struct["linear_velocity"]["z"], 
-										obj_struct["angular_velocity"]["x"], obj_struct["angular_velocity"]["y"], obj_struct["angular_velocity"]["z"], time_frame]
+									obj_struct["rotation"]["x"]["value"], obj_struct["rotation"]["y"]["value"], obj_struct["rotation"]["z"]["value"], 
+									obj_struct["linear_velocity"]["x"], obj_struct["linear_velocity"]["y"], obj_struct["linear_velocity"]["z"], 
+									obj_struct["angular_velocity"]["x"], obj_struct["angular_velocity"]["y"], obj_struct["angular_velocity"]["z"], time_frame]
 			
 			# A workaround that is close enough to a proper to a theoretical TAGame.Ball_TA:HitPlayerNum marking.
 			# Using TAGame.Ball_TA:HitTeamNum is inadequate.
@@ -171,20 +188,20 @@ if process_replay:
 						dist = math.sqrt(math.fsum([(car_pos[0] - ball_data[0]) ** 2, 
 							(car_pos[1] - ball_data[1]) ** 2, 
 							(car_pos[2] - ball_data[2]) ** 2]))
-					except Exception as e: # An Index Out Of Range Exception BECAUSE CAR RESPAWNS IN REPLAYS ARE INCONSISTENT AF SO I'M SORRY
+					except Exception as e: # An Index Out Of Range Exception, because car respawns in replays are inconsistent
 						#print(e,car_values,car_position,time_frame)
 						continue
 
 					if dist < 250: # Farthest dist while still hitting the ball is 173.124233uu (tested w/ breakout), add buffer to that due to "replay lag" to be on the safe side.
 						car_hit_ball = True
+						break
 
 				if not car_hit_ball and ball_in_play:
 					if not old_no_contact:
-						end_data_set.append([])
-						end_data_set[-1].append(ball_data)
+						end_data_set.append(numpy.array([ball_data]))
 						old_no_contact = True
 					else:
-						end_data_set[-1].append(ball_data)
+						end_data_set[-1] = numpy.concatenate((end_data_set[-1], [ball_data]))
 				else:
 					old_no_contact = False
 
@@ -222,36 +239,60 @@ if process_replay:
 		else:
 			print(file_path, "does not meet the standard requirements.")
 
-	if not train_on_data:
-		with open(str(time.time()) + ".rldata", "w") as dump:
-			dump.write(json.dumps(end_data_set, separators=(',',':')))
-			dump.close()
+	if not compress_data:
+		numpy.savez_compressed("" + str(time.time()) + ".large.npz", end_data_set)
 
+if compress_data:
+	if not process_replay:
+		for datum in huge_data:
+			temp = numpy.load(datum)
+			temp_2 = temp["arr_0"]
+			end_data_set.extend(temp_2)
+
+	data_input_write = numpy.empty((0, 13))
+	data_output_write = numpy.empty((0, 3))
+
+	for ball_sequence in end_data_set:
+		combos = list(itertools.combinations(range(ball_sequence.shape[0]), 2))
+		combos_stratify_num = 60
+
+		final_combos = []
+		
+		if len(combos) < combos_stratify_num:
+			final_combos = combos
+		else:
+			final_combos = random.sample(combos, combos_stratify_num)
+
+		for in_state, out_state in final_combos:
+			delta_time = numpy.array([ball_sequence[out_state][12] - ball_sequence[in_state][12]])
+			final_input_array = numpy.concatenate((ball_sequence[in_state][:12], delta_time))
+			data_input_write = numpy.concatenate((data_input_write, [final_input_array]))
+			data_output_write = numpy.concatenate((data_output_write, [ball_sequence[out_state][:3]]))
+
+	numpy.savez_compressed("" + str(time.time()) + ".npz", data_input=data_input_write, data_output=data_output_write)	
+	
 if train_on_data:
 	if not process_replay:
 		if len(rl_data) == 0:
 			sys.exit("No data to train with exists.")
 
+	data_input = numpy.empty((0, 13))
+	data_output = numpy.empty((0, 3))
+
 	if len(rl_data) > 0:
 		for datum in rl_data:
-			with open(datum, "r") as opened:
-				temp = json.loads(opened.read())
-				end_data_set[0].extend(temp[0])
-				end_data_set[1].extend(temp[1])
-				opened.close()
+			temp = numpy.load(datum)
+			data_input = numpy.concatenate((data_input, temp["data_input"]))
+			data_output = numpy.concatenate((data_input, temp["data_output"]))
 
-	print(len(end_data_set[0]))
-
-	# TEMPORARY: Tweak final data set to see if results change:
-	# What if only specifying distance is the key factor?
-
-	for i in range(len(end_data_set[1])):
-		end_data_set[1][i] = end_data_set[1][i][:3]
+	data_input = data_input.astype(numpy.float32)
+	data_output = data_output.astype(numpy.float32)
+	
+	print(data_input.shape[0])
 
 	# Start of Training Simulation with Tensorflow
 
 	import tensorflow as tf
-	import numpy
 
 	# Based on ReLU
 	# TODO: Take a look at PReLU, and see if it helps.
@@ -297,9 +338,6 @@ if train_on_data:
 	while train_bounds % least_common_multiple != 0:
 		train_bounds = train_bounds - 1
 
-	data_input = numpy.asarray(end_data_set[0], numpy.float32)
-	data_output = numpy.asarray(end_data_set[1], numpy.float32)
-
 	numpy.random.seed(int(time.time()))
 	rng_state = numpy.random.get_state()
 	numpy.random.shuffle(data_input)
@@ -321,7 +359,6 @@ if train_on_data:
 	first_layer = tf.nn.relu(tf.add(tf.matmul(x_input, W_lay1), b_lay1))
 	first_layer_drop = tf.nn.dropout(first_layer, keep_prob)
 	"""
-	
 	y_calc = create_graph(x_input, [13, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 3])
 
 	counter_out = 0
